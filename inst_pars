@@ -1,0 +1,79 @@
+from selenium.webdriver.common.by import By
+from selenium.common.exceptions import NoSuchElementException
+import time
+from random import randint
+from seleniumbase import Driver
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
+from utils import check_time,download_image
+
+class Inst_pars():
+    def __init__(self, sessions_config, proxy_config=None):
+        self.proxy_config = proxy_config
+        self.sessions_config = sessions_config
+        self.driver = Driver(proxy=proxy_config,user_data_dir=sessions_config,uc=True)
+
+    def get_data(self,type_post,number_of_photo=3):
+        data = {}
+        post = self.driver.find_element(By.TAG_NAME,'article')
+        if type_post == 'one_photo':
+            photo = post.find_element(By.CSS_SELECTOR,"img[crossorigin='anonymous']").get_attribute('src')
+            data.update({'img':[photo]})
+        elif type_post == 'carusel':
+            def remove_duplicates_preserve_order(input_list):
+                seen = set()
+                return [x for x in input_list if not (x in seen or seen.add(x))]
+            list_final_url = []
+            list_photo = []
+            while len(list_photo) < number_of_photo:
+                time.sleep(randint(2,3))
+                try:
+                    post.find_element(By.CSS_SELECTOR,"button[aria-label='Next']").uc_click()
+                except NoSuchElementException:
+                    break
+                ul_tag = post.find_element(By.TAG_NAME,'ul')
+                all_li = ul_tag.find_elements(By.TAG_NAME,'li')
+                for i in all_li:
+                    try:
+                        list_photo.append(i.find_element(By.TAG_NAME,'img').get_attribute("src"))
+                        list_photo = remove_duplicates_preserve_order(list_photo)
+                    except NoSuchElementException:
+                        pass
+            for i in list_photo:
+                list_final_url.append(download_image(i))
+            data.update({'img':list_final_url})
+        try:
+            text_post = post.find_element(By.TAG_NAME,'h1').text
+            data.update({'text':text_post})
+        except NoSuchElementException:
+            pass
+        return data
+
+    def check_type_post(self,posts):
+        carusel = "svg[aria-label='Carousel']"
+        for i in posts:
+            try:
+                i.find_element(By.CSS_SELECTOR, carusel)
+                i.uc_click()
+                return 'carusel'
+            except NoSuchElementException:
+                pass
+        for i in posts:
+            try:
+                i.find_element(By.TAG_NAME, 'svg')
+            except NoSuchElementException:
+                i.uc_click()
+                return 'one_photo'
+    def check_account(self,url):
+        self.driver.get(f'https://www.instagram.com/{url}/')
+        wait = WebDriverWait(self.driver, 15)
+        time.sleep(randint(2, 3))
+        element = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR,"div[style='display: flex; flex-direction: column; padding-bottom: 0px; padding-top: 0px; position: relative;']")))
+        posts = element.find_elements(By.TAG_NAME,'a')
+        return posts
+
+    def __getattr__(self, name):
+        if hasattr(self.driver, name):
+            return getattr(self.driver, name)
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
