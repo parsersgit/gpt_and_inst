@@ -1,0 +1,132 @@
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+import time
+from random import randint
+from seleniumbase import Driver
+import re
+import pyperclip
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
+from bs4 import BeautifulSoup
+import asyncio
+
+def find_first_kiril_element(lst):
+    latin_pattern = re.compile('[А-Яа-яЁё]')
+
+    for element in lst:
+        if latin_pattern.search(element):
+            return element
+
+
+class Gpts:
+    def __init__(self):
+        self.queue = asyncio.Queue()
+        self.driver = None
+        self.worker_task = None
+
+    def create_driver(self,sessions_config,proxy_config=None):
+        if self.driver is None:
+            self.driver = Driver(proxy=proxy_config,user_data_dir=sessions_config,uc=True)
+
+    def destroy_driver(self):
+        if self.driver:
+            self.driver.quit()
+            self.driver = None
+
+    async def process_message_with_selenium(self, data:dict) -> str:
+        self.create_driver(data['session_path'])
+        self.driver.get('https://chatgpt.com/')
+        time.sleep(randint(5,6))
+        self.driver.get(data['url_gpts'])
+        xpath_send = {
+            'text': (By.ID, "prompt-textarea"),
+            'img': (By.CSS_SELECTOR, "input[type='file']")
+        }
+        start_time = time.time()
+        wait = WebDriverWait(self.driver, 10)
+
+        for n_type, n_send in data.items():
+            if n_type in ['text','img']:
+                element = wait.until(EC.presence_of_element_located((xpath_send[n_type][0], xpath_send[n_type][1])))
+
+            if n_type == 'text':
+                time.sleep(randint(2, 3))
+                pyperclip.copy(n_send)
+                actions = ActionChains(self.driver)
+                element.click()
+                actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
+                time.sleep(randint(2, 3))
+
+            elif n_type == 'img':
+                file_paths = '\n'.join(n_send)
+                a = len(n_send)*5
+                b = len(n_send)*6
+                element.send_keys(file_paths)
+                time.sleep(randint(a, b))
+        time.sleep(randint(5, 6))
+        try:
+            self.driver.find_element(By.CSS_SELECTOR, "button[data-testid='send-button']").click()
+        except:
+            self.driver.send_keys(Keys.ENTER)
+        time.sleep(randint(15, 20))
+        while True:
+            if time.time() - start_time > 120:
+                self.driver.refresh()
+                start_time = time.time()
+            try:
+                q = self.driver.get_page_source()
+                s = BeautifulSoup(q, 'lxml')
+                a = s.find_all('article')
+                if len(a) != 1:
+                    break
+                else:
+                    time.sleep(randint(5, 7))
+            except Exception as e:
+                if time.time() - start_time > 120:
+                    self.driver.refresh()
+                    start_time = time.time()
+        temp_list = []
+        p_list = a[-1].find_all('p')
+        for i in p_list:
+            temp_list.append(re.sub(r'#\S+', '', i.text).strip())
+        time.sleep(randint(1, 2))
+        self.driver.refresh()
+        time.sleep(randint(1, 2))
+        return find_first_kiril_element(temp_list)
+
+    async def worker(self):
+        """
+        Фоновый воркер для обработки очереди.
+        """
+        while True:
+            data = await self.queue.get()
+            try:
+                response = await self.process_message_with_selenium(data)
+                data["future"].set_result(response)
+            except Exception as e:
+                data["future"].set_exception(e)
+            finally:
+                self.queue.task_done()
+
+            if self.queue.empty():
+                self.destroy_driver()
+
+    async def start_worker(self):
+        if self.worker_task is None:
+            self.worker_task = asyncio.create_task(self.worker())
+
+    async def add_message_to_queue(self, data: dict) -> asyncio.Future:
+        """
+        Добавляет сообщение в очередь и возвращает future для получения результата.
+        """
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        data.update({"future":future})
+        await self.queue.put(data)
+        return future
+
+    def __getattr__(self, name):
+        if hasattr(self.driver, name):
+            return getattr(self.driver, name)
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
