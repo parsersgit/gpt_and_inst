@@ -1,0 +1,39 @@
+from bs4 import BeautifulSoup
+import traceback
+from datetime import datetime
+import time
+import os
+import re
+import requests
+def check_time(html):
+    soup = BeautifulSoup(html,'lxml')
+    try:
+        post = soup.find('article', {'role': 'presentation'})
+    except:
+        traceback.print_exc()
+        return None
+    s = post.find('time').get('datetime')
+    dt_obj = datetime.fromisoformat(s.replace('Z', '+00:00'))
+    unix_time = dt_obj.timestamp()
+    if time.time() - int(unix_time) > 20000:
+        return None
+    return True
+
+def download_image(url, save_dir='.'):
+    random_filename = str(''.join(re.findall(r'\d+', url))[4::5]) +".jpg"
+    save_path = os.path.join(save_dir, random_filename)
+    response = requests.get(url)
+    if response.status_code == 200:
+        with open(save_path, 'wb') as file:
+            file.write(response.content)
+        return os.path.abspath(save_path)
+    else:
+        raise Exception(response.status_code)
+
+
+def find_first_kiril_element(lst):
+    latin_pattern = re.compile('[А-Яа-яЁё]')
+
+    for element in lst:
+        if latin_pattern.search(element):
+            return element
