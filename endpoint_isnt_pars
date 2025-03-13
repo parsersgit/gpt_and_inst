@@ -1,0 +1,78 @@
+import time
+from random import randint
+from inst_pars import Inst_pars
+from config import *
+import requests
+import asyncio
+try:
+    from .bot.inst.utils import *
+except:
+    from bot.inst.utils import *
+# Функции для работы с файлами
+def read_txt(name_file):
+    with open(name_file, 'r', encoding='utf-8') as f:
+        return f.read().splitlines()
+
+def write_txt(name_file, val):
+    with open(name_file, 'w', encoding='utf-8') as f:
+        f.write("\n".join(val))
+
+# Функция для обработки ответа от сервера
+async def process_response(data, current_url, account, msg_id):
+    data.update({
+        'url_gpts': 'https://chatgpt.com/g/g-673f2ea548e4819187a0eb6a22c46c0a-horoscope',
+        'session_path': path_seession_gtps
+    })
+    url_gpts = "http://127.0.0.1:8000/process"
+    response = requests.post(url_gpts, json=data)
+    if response.status_code == 200:
+        if 'img' in data.keys():
+            for i in data['img']:
+                os.remove(i)
+        url_send = "http://127.0.0.1:8001/send_comment_inst"
+        comment = str(response.json()['result'])
+        payloard = {
+            'comment': comment,
+            'url_post': current_url,
+            'account': account,
+            'session_path': path_session_inst_send
+        }
+        response = requests.post(url_send, json=payloard)
+        if str(response.json()['result']) == 'true':
+            await send_reply(msg_id, comment)
+    else:
+        pass
+
+# Функция для обработки аккаунта
+async def process_account(account, pars_inst):
+    posts = pars_inst.check_account(account)
+    time.sleep(randint(2, 3))
+    type_post = pars_inst.check_type_post(posts)
+    if type_post:
+        current_url = pars_inst.current_url
+        comment_post = read_txt(name_file='comment_post.txt')
+        if current_url not in comment_post:
+            comment_post.append(current_url)
+            write_txt(name_file='comment_post.txt', val=comment_post)
+            data = pars_inst.get_data(type_post)
+            msg_id = await send_post_inst(data, current_url)
+            pars_inst.quit()
+            await process_response(data, current_url, account, msg_id)
+            return True  # Сигнализируем, что сессия была завершена и нужна переинициализация
+    return False
+
+# Основная функция парсинга
+async def pars():
+    accounts = read_txt(name_file='list_account.txt')
+    pars_inst = Inst_pars(path_session_inst_pars)
+    pars_inst.get('https://www.instagram.com/')
+    for account in accounts:
+        # Если обработка аккаунта произошла, переинициализируем сессию
+        if await process_account(account, pars_inst):
+            pars_inst = Inst_pars(path_session_inst_pars)
+            pars_inst.get('https://www.instagram.com/')
+
+# Главный цикл
+while True:
+    asyncio.run(pars())
+    time.sleep(randint(7200, 8000))
