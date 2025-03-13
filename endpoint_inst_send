@@ -1,0 +1,31 @@
+import uvicorn
+from fastapi import FastAPI
+from pydantic import BaseModel
+import asyncio
+from inst_send import Send_comment
+
+app = FastAPI()
+
+other_instance = Send_comment()
+
+class OtherRequest(BaseModel):
+    comment: str
+    url_post:str
+    account: str
+    session_path:str
+
+@app.on_event("startup")
+async def startup_event():
+    await other_instance.start_worker()
+
+@app.post("/send_comment_inst")
+async def process_request(request_data: OtherRequest):
+    try:
+        future = await other_instance.add_message_to_queue(request_data.dict())
+        result = await future
+        return {"result": result}
+    except Exception as e:
+        return {"error": str(e)}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8001)
