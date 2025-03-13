@@ -1,0 +1,87 @@
+from selenium.webdriver.common.by import By
+from selenium.common.exceptions import NoSuchElementException
+import time
+from random import randint
+from seleniumbase import Driver
+import pyautogui
+import pyperclip
+import asyncio
+class Send_comment:
+    def __init__(self):
+        self.queue = asyncio.Queue()
+        self.driver = None 
+        self.worker_task = None
+
+    def create_driver(self,sessions_config,proxy_config=None):
+        if self.driver is None:
+            print("Creating Selenium Driver...")
+            self.driver = Driver(proxy=proxy_config,user_data_dir=sessions_config,uc=True)
+
+    def destroy_driver(self):
+        if self.driver:
+            print("Quitting Selenium Driver...")
+            self.driver.quit()
+            self.driver = None
+
+    async def send_comment(self,data):
+        self.create_driver(data['session_path'])
+        self.driver.get('https://www.instagram.com/')
+        time.sleep(randint(3,4))
+        self.driver.execute_script("window.scrollTo(0, 1000);")
+        time.sleep(3)
+        self.driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(5)
+        self.driver.get(f'https://www.instagram.com/{data["account"]}/')
+        time.sleep(randint(3, 4))
+        self.driver.execute_script("window.scrollTo(0, 450);")
+        time.sleep(3)
+        self.driver.execute_script("window.scrollTo(0, 0);")
+        time.sleep(randint(3,4))
+        self.driver.get(data['url_post'])
+        time.sleep(5)
+        pyautogui.moveTo(200, 200)
+        pyperclip.copy(data['comment'])
+        element = self.driver.find_element(By.TAG_NAME,'textarea')
+        element.uc_click()
+        time.sleep(2)
+        element = self.driver.find_element(By.TAG_NAME,'textarea')
+        self.driver.execute_script("arguments[0].value = arguments[1];", element,data['comment'])
+        time.sleep(1)
+        self.driver.find_element(By.TAG_NAME, 'textarea')
+        element.send_keys(" ")
+        time.sleep(2)
+        element.send_keys("\b")
+        time.sleep(2)
+        self.driver.find_elements(By.CSS_SELECTOR, 'div[role="button"].x1i10hfl')[-1].uc_click()
+        return 'true'
+
+    async def worker(self):
+        while True:
+            data = await self.queue.get()
+            try:
+                response = await self.send_comment(data)
+                data["future"].set_result(response)
+            except Exception as e:
+                data["future"].set_exception(e)
+            finally:
+                self.queue.task_done()
+
+            if self.queue.empty():
+                self.destroy_driver()
+
+    async def start_worker(self):
+        if self.worker_task is None:
+            print("Starting worker task...")
+            self.worker_task = asyncio.create_task(self.worker())
+
+    async def add_message_to_queue(self, data: dict) -> asyncio.Future:
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        data.update({"future":future})
+        await self.queue.put(data)
+        return future
+
+    def __getattr__(self, name):
+        if hasattr(self.driver, name):
+            return getattr(self.driver, name)
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
